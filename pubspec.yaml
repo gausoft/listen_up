@@ -35,6 +35,17 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # Text-to-Speech (uses native Android/iOS TTS engines - works offline)
+  flutter_tts: ^4.2.0
+  google_fonts: ^6.3.3
+  hugeicons_pro: ^0.0.2
+  flutter_langdetect: ^0.0.2
+  connectivity_plus: ^7.0.0
+  http: ^1.6.0
+  just_audio: ^0.10.5
+  audio_session: ^0.2.2
+  path_provider: ^2.1.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -45,6 +56,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -87,3 +99,13 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# App icon configuration
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/audipod.png"
+  adaptive_icon_background: "#7C3AED"
+  adaptive_icon_foreground: "assets/icon/audipod.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true

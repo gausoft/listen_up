@@ -1,0 +1,5 @@
+package com.gausoft.listen_up
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()

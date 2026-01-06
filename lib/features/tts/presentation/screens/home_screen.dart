@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:hugeicons_pro/hugeicons.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/services/web_extractor_service.dart';
 import '../controllers/tts_controller.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/settings_bottom_sheet.dart';
@@ -18,6 +19,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final TtsController _ttsController = TtsController();
   final TextEditingController _textController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
+  final WebExtractorService _webExtractor = WebExtractorService();
+
+  bool _isExtractingUrl = false;
+  String? _extractedTitle;
+  String? _sourceUrl;
 
   @override
   void initState() {
@@ -69,15 +75,68 @@ class _HomeScreenState extends State<HomeScreen> {
   void _clearText() {
     _textController.clear();
     _ttsController.stop();
+    _extractedTitle = null;
+    _sourceUrl = null;
     setState(() {});
   }
 
   Future<void> _pasteText() async {
     final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
     if (clipboardData?.text != null && clipboardData!.text!.isNotEmpty) {
-      _textController.text = clipboardData.text!;
-      setState(() {});
+      final text = clipboardData.text!.trim();
+      
+      // Check if it's a URL
+      if (WebExtractorService.isValidUrl(text)) {
+        await _extractFromUrl(text);
+      } else {
+        _textController.text = text;
+        _extractedTitle = null;
+        _sourceUrl = null;
+        setState(() {});
+      }
     }
+  }
+
+  Future<void> _extractFromUrl(String url) async {
+    setState(() {
+      _isExtractingUrl = true;
+      _extractedTitle = null;
+      _sourceUrl = null;
+    });
+
+    try {
+      final content = await _webExtractor.extractFromUrl(url);
+      if (mounted) {
+        _textController.text = content.content;
+        _extractedTitle = content.title;
+        _sourceUrl = content.sourceUrl;
+        setState(() {
+          _isExtractingUrl = false;
+        });
+      }
+    } on WebExtractorException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isExtractingUrl = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(label: 'OK', onPressed: () {}),
+          ),
+        );
+      }
+    }
+  }
+
+  void _onTextChanged(String value) {
+    // Reset extracted content info if user manually edits
+    if (_sourceUrl != null) {
+      _extractedTitle = null;
+      _sourceUrl = null;
+    }
+    setState(() {});
   }
 
   @override
@@ -119,22 +178,63 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       child: Stack(
                         children: [
-                          TextField(
-                            controller: _textController,
-                            focusNode: _focusNode,
-                            maxLines: null,
-                            expands: true,
-                            textAlignVertical: TextAlignVertical.top,
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodyLarge?.copyWith(height: 1.6),
-                            decoration: const InputDecoration(
-                              hintText: 'Paste or type your text here...',
+                          // Loading overlay for URL extraction
+                          if (_isExtractingUrl)
+                            Container(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surface
+                                  .withValues(alpha: 0.8),
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const CircularProgressIndicator(),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'Extracting content...',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .outline,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            TextField(
+                              controller: _textController,
+                              focusNode: _focusNode,
+                              maxLines: null,
+                              expands: true,
+                              textAlignVertical: TextAlignVertical.top,
+                              style: Theme.of(
+                                context,
+                              ).textTheme.bodyLarge?.copyWith(height: 1.6),
+                              decoration: InputDecoration(
+                                hintText: 'Paste text or URL here...',
+                                // Show extracted title as label
+                                labelText: _extractedTitle,
+                                labelStyle: Theme.of(context)
+                                    .textTheme
+                                    .titleSmall
+                                    ?.copyWith(
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                floatingLabelBehavior:
+                                    FloatingLabelBehavior.always,
+                              ),
+                              onChanged: _onTextChanged,
                             ),
-                            onChanged: (_) => setState(() {}),
-                          ),
-                          // Paste button (shown when empty)
-                          if (_textController.text.isEmpty)
+                          // Paste button (shown when empty and not loading)
+                          if (_textController.text.isEmpty && !_isExtractingUrl)
                             Positioned(
                               bottom: 16,
                               right: 16,
@@ -159,6 +259,39 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
+
+                  // Source URL indicator (when content extracted from URL)
+                  if (_sourceUrl != null && _textController.text.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 4,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            HugeIconsStroke.link01,
+                            size: 14,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _sourceUrl!,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
+                                  ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
 
                   // Clear button & Character count (only show when there's text)
                   if (_textController.text.isNotEmpty)

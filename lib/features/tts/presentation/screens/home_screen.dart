@@ -3,6 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:hugeicons_pro/hugeicons.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/services/web_extractor_service.dart';
+import '../../../history/data/models/history_item.dart';
+import '../../../history/data/repositories/history_repository.dart';
+import '../../../history/presentation/screens/history_screen.dart';
 import '../controllers/tts_controller.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/settings_bottom_sheet.dart';
@@ -18,17 +22,31 @@ class _HomeScreenState extends State<HomeScreen> {
   final TtsController _ttsController = TtsController();
   final TextEditingController _textController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
+  final HistoryRepository _historyRepository = HistoryRepository();
+  final WebExtractorService _webExtractor = WebExtractorService();
+
+  bool _isRepositoryReady = false;
+  bool _isExtractingUrl = false;
+  String? _extractedTitle;
+  String? _sourceUrl;
 
   @override
   void initState() {
     super.initState();
-    _initTts();
+    _initServices();
     _ttsController.addListener(_handleTtsError);
   }
 
-  Future<void> _initTts() async {
-    await _ttsController.init();
-    if (mounted) setState(() {});
+  Future<void> _initServices() async {
+    await Future.wait([
+      _ttsController.init(),
+      _historyRepository.init(),
+    ]);
+    if (mounted) {
+      setState(() {
+        _isRepositoryReady = true;
+      });
+    }
   }
 
   void _handleTtsError() {
@@ -52,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _ttsController.dispose();
     _textController.dispose();
     _focusNode.dispose();
+    _historyRepository.close();
     super.dispose();
   }
 
@@ -66,18 +85,124 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _showHistory() async {
+    final result = await Navigator.push<HistoryItem>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => HistoryScreen(repository: _historyRepository),
+      ),
+    );
+
+    if (result != null && mounted) {
+      _textController.text = result.content;
+      setState(() {});
+    }
+  }
+
   void _clearText() {
     _textController.clear();
     _ttsController.stop();
     setState(() {});
   }
 
+  /// Check if a string looks like a URL
+  bool _isUrl(String text) {
+    final trimmed = text.trim();
+    // Check for common URL patterns
+    final urlPattern = RegExp(
+      r'^(https?:\/\/)?'
+      r'([\da-z\.-]+)\.'
+      r'([a-z\.]{2,6})'
+      r'([\/\w \.-]*)*\/?$',
+      caseSensitive: false,
+    );
+    return urlPattern.hasMatch(trimmed) ||
+        trimmed.startsWith('http://') ||
+        trimmed.startsWith('https://') ||
+        trimmed.startsWith('www.');
+  }
+
+  /// Extract content from URL
+  Future<void> _extractFromUrl(String url) async {
+    setState(() {
+      _isExtractingUrl = true;
+      _extractedTitle = null;
+      _sourceUrl = null;
+    });
+
+    try {
+      final content = await _webExtractor.extractFromUrl(url);
+      if (mounted) {
+        _textController.text = content.content;
+        _extractedTitle = content.title;
+        _sourceUrl = content.sourceUrl;
+        setState(() {
+          _isExtractingUrl = false;
+        });
+      }
+    } on WebExtractorException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isExtractingUrl = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(label: 'OK', onPressed: () {}),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _pasteText() async {
     final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
     if (clipboardData?.text != null && clipboardData!.text!.isNotEmpty) {
-      _textController.text = clipboardData.text!;
-      setState(() {});
+      final text = clipboardData.text!.trim();
+
+      // Check if it's a URL
+      if (_isUrl(text)) {
+        await _extractFromUrl(text);
+      } else {
+        // Plain text, just paste it
+        _textController.text = text;
+        _extractedTitle = null;
+        _sourceUrl = null;
+        setState(() {});
+      }
     }
+  }
+
+  /// Save content to history when playback starts
+  Future<void> _saveToHistory(String text) async {
+    if (!_isRepositoryReady || text.trim().isEmpty) return;
+
+    // Use extracted title if available, otherwise generate from content
+    String title;
+    if (_extractedTitle != null && _extractedTitle!.isNotEmpty) {
+      title = _extractedTitle!;
+    } else {
+      final firstLine = text.split('\n').first.trim();
+      title = firstLine.length > 50
+          ? '${firstLine.substring(0, 50)}...'
+          : firstLine.isNotEmpty
+              ? firstLine
+              : 'Untitled';
+    }
+
+    await _historyRepository.addOrUpdate(
+      title: title,
+      content: text,
+      sourceUrl: _sourceUrl,
+    );
+  }
+
+  /// Called when play button is pressed
+  Future<void> _onPlayPressed(String text) async {
+    // Save to history before playing
+    await _saveToHistory(text);
+    await _ttsController.togglePlayPause(text);
   }
 
   @override
@@ -88,6 +213,11 @@ class _HomeScreenState extends State<HomeScreen> {
         appBar: AppBar(
           title: const Text(AppConstants.appName),
           centerTitle: true,
+          leading: IconButton(
+            icon: const Icon(HugeIconsStroke.clock01),
+            onPressed: _isRepositoryReady ? _showHistory : null,
+            tooltip: 'History',
+          ),
           actions: [
             IconButton(
               icon: const Icon(HugeIconsStroke.settings02),
@@ -131,10 +261,45 @@ class _HomeScreenState extends State<HomeScreen> {
                             decoration: const InputDecoration(
                               hintText: 'Paste or type your text here...',
                             ),
-                            onChanged: (_) => setState(() {}),
+                            onChanged: (_) {
+                              // Reset extracted info if user manually edits
+                              if (_sourceUrl != null) {
+                                _extractedTitle = null;
+                                _sourceUrl = null;
+                              }
+                              setState(() {});
+                            },
                           ),
-                          // Paste button (shown when empty)
-                          if (_textController.text.isEmpty)
+                          // Loading overlay for URL extraction
+                          if (_isExtractingUrl)
+                            Container(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surface
+                                  .withValues(alpha: 0.9),
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const CircularProgressIndicator(),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'Extracting content...',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .outline,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          // Paste button (shown when empty and not loading)
+                          if (_textController.text.isEmpty && !_isExtractingUrl)
                             Positioned(
                               bottom: 16,
                               right: 16,
@@ -203,6 +368,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     enabled:
                         _ttsController.isInitialized &&
                         _textController.text.isNotEmpty,
+                    onPlayPressed: () => _onPlayPressed(_textController.text),
                   ),
 
                   const SizedBox(height: 24),

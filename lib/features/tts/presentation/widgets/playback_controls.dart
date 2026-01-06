@@ -7,6 +7,7 @@ class PlaybackControls extends StatelessWidget {
   final TtsController controller;
   final String text;
   final bool enabled;
+  final VoidCallback? onPlayPressed;
 
   // Speed values: 1.2x, 1.4x, 1.6x, 1.8x, 2.0x (then cycle back)
   // Mapped to speechRate (0.0-1.0): formula is (displaySpeed - 0.5) / 1.5
@@ -17,6 +18,7 @@ class PlaybackControls extends StatelessWidget {
     required this.controller,
     required this.text,
     this.enabled = true,
+    this.onPlayPressed,
   });
 
   Future<void> _cycleSpeed(TtsController controller, String text) async {
@@ -104,7 +106,13 @@ class PlaybackControls extends StatelessWidget {
                 ),
                 child: IconButton(
                   onPressed: enabled && !controller.isLoading
-                      ? () => controller.togglePlayPause(text)
+                      ? () {
+                          if (onPlayPressed != null) {
+                            onPlayPressed!();
+                          } else {
+                            controller.togglePlayPause(text);
+                          }
+                        }
                       : null,
                   icon: Icon(
                     controller.isPlaying

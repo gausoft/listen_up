@@ -7,8 +7,8 @@ import '../../../../core/services/web_extractor_service.dart';
 import '../../../history/data/models/history_item.dart';
 import '../../../history/data/repositories/history_repository.dart';
 import '../../../history/presentation/screens/history_screen.dart';
+import '../controllers/highlighting_text_controller.dart';
 import '../controllers/tts_controller.dart';
-import '../widgets/highlighted_text_view.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/settings_bottom_sheet.dart';
 
@@ -21,8 +21,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final TtsController _ttsController = TtsController();
-  final TextEditingController _textController = TextEditingController();
+  final HighlightingTextEditingController _textController =
+      HighlightingTextEditingController();
   final FocusNode _focusNode = FocusNode();
+  final ScrollController _scrollController = ScrollController();
   final HistoryRepository _historyRepository = HistoryRepository();
   final WebExtractorService _webExtractor = WebExtractorService();
 
@@ -35,7 +37,18 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _initServices();
-    _ttsController.addListener(_handleTtsError);
+    _ttsController.addListener(_handleTtsStateChange);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Set highlight colors from theme
+    final theme = Theme.of(context);
+    _textController.setHighlightColors(
+      backgroundColor: theme.colorScheme.primaryContainer,
+      textColor: theme.colorScheme.onPrimaryContainer,
+    );
   }
 
   Future<void> _initServices() async {
@@ -50,7 +63,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _handleTtsError() {
+  /// Handle TTS state changes - update highlighting and show errors
+  void _handleTtsStateChange() {
+    // Handle errors
     if (_ttsController.lastError != null && mounted) {
       final error = _ttsController.lastError!;
       _ttsController.clearError();
@@ -63,14 +78,60 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
+
+    // Update highlighting state
+    if (!_ttsController.usingCloudTts) {
+      final isActive = _ttsController.isPlaying || _ttsController.isPaused;
+      _textController.setHighlightingEnabled(isActive);
+
+      // Update highlight position
+      final newStart = _ttsController.currentWordStart;
+      final oldStart = _textController.highlightStart;
+      _textController.updateHighlight(
+        newStart,
+        _ttsController.currentWordEnd,
+      );
+
+      // Auto-scroll when playing and position changed
+      if (_ttsController.isPlaying && newStart != null && newStart != oldStart) {
+        _scrollToHighlight(newStart);
+      }
+
+      // Reset highlighting on stop
+      if (_ttsController.isStopped) {
+        _textController.resetHighlight();
+      }
+    }
+  }
+
+  /// Auto-scroll to keep the highlighted word visible
+  void _scrollToHighlight(int charPosition) {
+    if (!_scrollController.hasClients) return;
+
+    final text = _textController.text;
+    if (text.isEmpty) return;
+
+    // Estimate scroll position based on character position
+    // This is an approximation - assumes roughly uniform character density
+    final progress = charPosition / text.length;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final targetScroll = (maxScroll * progress).clamp(0.0, maxScroll);
+
+    // Smooth scroll to target position
+    _scrollController.animateTo(
+      targetScroll,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+    );
   }
 
   @override
   void dispose() {
-    _ttsController.removeListener(_handleTtsError);
+    _ttsController.removeListener(_handleTtsStateChange);
     _ttsController.dispose();
     _textController.dispose();
     _focusNode.dispose();
+    _scrollController.dispose();
     _historyRepository.close();
     super.dispose();
   }
@@ -250,51 +311,33 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       child: Stack(
                         children: [
-                          // Show HighlightedTextView when playing OR paused with local TTS
-                          // This keeps the UI state during pause
-                          if ((_ttsController.isPlaying ||
-                                  _ttsController.isPaused) &&
-                              !_ttsController.usingCloudTts &&
-                              _textController.text.isNotEmpty)
-                            GestureDetector(
-                              onTap: () {
-                                // Tap to stop and edit
-                                _ttsController.stop();
-                              },
-                              child: HighlightedTextView(
-                                text: _textController.text,
-                                currentWordStart:
-                                    _ttsController.currentWordStart,
-                                currentWordEnd: _ttsController.currentWordEnd,
-                                isPlaying: _ttsController.isPlaying,
-                                textStyle: Theme.of(context)
-                                    .textTheme
-                                    .bodyLarge
-                                    ?.copyWith(height: 1.6),
-                              ),
-                            )
-                          else
-                            TextField(
-                              controller: _textController,
-                              focusNode: _focusNode,
-                              maxLines: null,
-                              expands: true,
-                              textAlignVertical: TextAlignVertical.top,
-                              style: Theme.of(
-                                context,
-                              ).textTheme.bodyLarge?.copyWith(height: 1.6),
-                              decoration: const InputDecoration(
-                                hintText: 'Paste or type your text here...',
-                              ),
-                              onChanged: (_) {
-                                // Reset extracted info if user manually edits
-                                if (_sourceUrl != null) {
-                                  _extractedTitle = null;
-                                  _sourceUrl = null;
-                                }
-                                setState(() {});
-                              },
+                          // Single TextField with integrated highlighting
+                          // No component switching = no visual glitches
+                          TextField(
+                            controller: _textController,
+                            focusNode: _focusNode,
+                            scrollController: _scrollController,
+                            maxLines: null,
+                            expands: true,
+                            textAlignVertical: TextAlignVertical.top,
+                            // Read-only during playback/pause
+                            readOnly: _ttsController.isPlaying ||
+                                _ttsController.isPaused,
+                            style: Theme.of(
+                              context,
+                            ).textTheme.bodyLarge?.copyWith(height: 1.6),
+                            decoration: const InputDecoration(
+                              hintText: 'Paste or type your text here...',
                             ),
+                            onChanged: (_) {
+                              // Reset extracted info if user manually edits
+                              if (_sourceUrl != null) {
+                                _extractedTitle = null;
+                                _sourceUrl = null;
+                              }
+                              setState(() {});
+                            },
+                          ),
                           // Loading overlay for URL extraction
                           if (_isExtractingUrl)
                             Container(

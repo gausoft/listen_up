@@ -250,9 +250,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       child: Stack(
                         children: [
-                          // Show HighlightedTextView when playing with local TTS
-                          // Otherwise show TextField for editing
-                          if (_ttsController.isPlaying &&
+                          // Show HighlightedTextView when playing OR paused with local TTS
+                          // This keeps the UI state during pause
+                          if ((_ttsController.isPlaying ||
+                                  _ttsController.isPaused) &&
                               !_ttsController.usingCloudTts &&
                               _textController.text.isNotEmpty)
                             GestureDetector(

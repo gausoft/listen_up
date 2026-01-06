@@ -63,8 +63,13 @@ class TtsController extends ChangeNotifier {
   // Word highlighting progress (for local TTS only)
   int? _currentWordStart;
   int? _currentWordEnd;
-  int? get currentWordStart => _currentWordStart;
-  int? get currentWordEnd => _currentWordEnd;
+  int _textOffset = 0; // Offset when resuming from middle of text
+
+  /// Get adjusted word positions (accounting for resume offset)
+  int? get currentWordStart =>
+      _currentWordStart != null ? _currentWordStart! + _textOffset : null;
+  int? get currentWordEnd =>
+      _currentWordEnd != null ? _currentWordEnd! + _textOffset : null;
 
   /// Callback when word progress changes
   Function(int start, int end)? onWordProgress;
@@ -192,6 +197,7 @@ class TtsController extends ChangeNotifier {
   void _resetWordProgress() {
     _currentWordStart = null;
     _currentWordEnd = null;
+    _textOffset = 0;
   }
 
   /// Pause speaking
@@ -203,14 +209,29 @@ class TtsController extends ChangeNotifier {
     }
   }
 
-  /// Resume speaking
+  /// Resume speaking from where we paused
   Future<void> resume() async {
     if (_usingCloudTts) {
       // ElevenLabs supports real pause/resume
       await _cloudTtsService.resume();
     } else {
-      // Local TTS doesn't support resume well, re-speak
-      if (_currentText.isNotEmpty) {
+      // Local TTS: continue from saved position
+      // Use the adjusted position (with offset already applied)
+      final pausePosition = currentWordStart;
+      if (_currentText.isNotEmpty && pausePosition != null) {
+        // Set offset to current pause position for correct highlighting
+        _textOffset = pausePosition;
+        _currentWordStart = null;
+        _currentWordEnd = null;
+
+        // Speak remaining text from pause position
+        final remainingText = _currentText.substring(pausePosition);
+        if (remainingText.isNotEmpty) {
+          await _localTtsService.speak(remainingText);
+        }
+      } else if (_currentText.isNotEmpty) {
+        // No position saved, restart from beginning
+        _textOffset = 0;
         await _localTtsService.speak(_currentText);
       }
     }
@@ -220,8 +241,8 @@ class TtsController extends ChangeNotifier {
   Future<void> togglePlayPause(String text) async {
     if (isPlaying) {
       await pause();
-    } else if (isPaused && text == _currentText && _usingCloudTts) {
-      // Only resume if using cloud TTS (supports real resume)
+    } else if (isPaused && text == _currentText) {
+      // Resume from where we paused (works for both cloud and local TTS)
       await resume();
     } else {
       await speak(text);

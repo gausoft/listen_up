@@ -8,6 +8,7 @@ import '../../../history/data/models/history_item.dart';
 import '../../../history/data/repositories/history_repository.dart';
 import '../../../history/presentation/screens/history_screen.dart';
 import '../controllers/tts_controller.dart';
+import '../widgets/highlighted_text_view.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/settings_bottom_sheet.dart';
 
@@ -249,27 +250,50 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       child: Stack(
                         children: [
-                          TextField(
-                            controller: _textController,
-                            focusNode: _focusNode,
-                            maxLines: null,
-                            expands: true,
-                            textAlignVertical: TextAlignVertical.top,
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodyLarge?.copyWith(height: 1.6),
-                            decoration: const InputDecoration(
-                              hintText: 'Paste or type your text here...',
+                          // Show HighlightedTextView when playing with local TTS
+                          // Otherwise show TextField for editing
+                          if (_ttsController.isPlaying &&
+                              !_ttsController.usingCloudTts &&
+                              _textController.text.isNotEmpty)
+                            GestureDetector(
+                              onTap: () {
+                                // Tap to stop and edit
+                                _ttsController.stop();
+                              },
+                              child: HighlightedTextView(
+                                text: _textController.text,
+                                currentWordStart:
+                                    _ttsController.currentWordStart,
+                                currentWordEnd: _ttsController.currentWordEnd,
+                                isPlaying: _ttsController.isPlaying,
+                                textStyle: Theme.of(context)
+                                    .textTheme
+                                    .bodyLarge
+                                    ?.copyWith(height: 1.6),
+                              ),
+                            )
+                          else
+                            TextField(
+                              controller: _textController,
+                              focusNode: _focusNode,
+                              maxLines: null,
+                              expands: true,
+                              textAlignVertical: TextAlignVertical.top,
+                              style: Theme.of(
+                                context,
+                              ).textTheme.bodyLarge?.copyWith(height: 1.6),
+                              decoration: const InputDecoration(
+                                hintText: 'Paste or type your text here...',
+                              ),
+                              onChanged: (_) {
+                                // Reset extracted info if user manually edits
+                                if (_sourceUrl != null) {
+                                  _extractedTitle = null;
+                                  _sourceUrl = null;
+                                }
+                                setState(() {});
+                              },
                             ),
-                            onChanged: (_) {
-                              // Reset extracted info if user manually edits
-                              if (_sourceUrl != null) {
-                                _extractedTitle = null;
-                                _sourceUrl = null;
-                              }
-                              setState(() {});
-                            },
-                          ),
                           // Loading overlay for URL extraction
                           if (_isExtractingUrl)
                             Container(

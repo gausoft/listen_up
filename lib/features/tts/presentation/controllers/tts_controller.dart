@@ -60,6 +60,15 @@ class TtsController extends ChangeNotifier {
   String? _lastError;
   String? get lastError => _lastError;
 
+  // Word highlighting progress (for local TTS only)
+  int? _currentWordStart;
+  int? _currentWordEnd;
+  int? get currentWordStart => _currentWordStart;
+  int? get currentWordEnd => _currentWordEnd;
+
+  /// Callback when word progress changes
+  Function(int start, int end)? onWordProgress;
+
   void clearError() {
     _lastError = null;
     notifyListeners();
@@ -83,7 +92,10 @@ class TtsController extends ChangeNotifier {
       }
     };
     _localTtsService.onProgress = (start, end) {
-      // Could be used for highlighting text in future
+      _currentWordStart = start;
+      _currentWordEnd = end;
+      onWordProgress?.call(start, end);
+      notifyListeners();
     };
 
     // Initialize cloud TTS
@@ -129,6 +141,7 @@ class TtsController extends ChangeNotifier {
   Future<void> speak(String text) async {
     _currentText = text;
     _lastError = null;
+    _resetWordProgress();
 
     if (isOnline) {
       // Use ElevenLabs cloud TTS
@@ -171,7 +184,14 @@ class TtsController extends ChangeNotifier {
     }
     _isPlaying = false;
     _isPaused = false;
+    _resetWordProgress();
     notifyListeners();
+  }
+
+  /// Reset word highlighting progress
+  void _resetWordProgress() {
+    _currentWordStart = null;
+    _currentWordEnd = null;
   }
 
   /// Pause speaking

@@ -51,22 +51,19 @@ class PlaybackControls extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
+    // Debug: check streaming state
+    debugPrint('PlaybackControls build - isStreaming: ${controller.isStreaming}');
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Loading text (simple, non-intrusive)
-        if (controller.isLoading)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              'Chargement...',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: colorScheme.outline,
-              ),
-            ),
-          ),
+        // Reserved space for streaming indicator (fixed height to avoid layout shifts)
+        SizedBox(
+          height: 20,
+          child: controller.isStreaming
+              ? _StreamingIndicator(color: colorScheme.primary)
+              : null,
+        ),
 
         // Playback controls
         Container(
@@ -99,13 +96,11 @@ class PlaybackControls extends StatelessWidget {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: enabled && !controller.isLoading
-                      ? colorScheme.primary
-                      : colorScheme.outline,
+                  color: enabled ? colorScheme.primary : colorScheme.outline,
                   shape: BoxShape.circle,
                 ),
                 child: IconButton(
-                  onPressed: enabled && !controller.isLoading
+                  onPressed: enabled
                       ? () {
                           if (onPlayPressed != null) {
                             onPlayPressed!();
@@ -178,6 +173,82 @@ class _SpeedChip extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Animated streaming indicator with pulsing dots
+class _StreamingIndicator extends StatefulWidget {
+  final Color color;
+
+  const _StreamingIndicator({required this.color});
+
+  @override
+  State<_StreamingIndicator> createState() => _StreamingIndicatorState();
+}
+
+class _StreamingIndicatorState extends State<_StreamingIndicator>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(3, (index) {
+        return AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            // Stagger the animation for each dot
+            final delay = index * 0.2;
+            final value = ((_controller.value + delay) % 1.0);
+            final scale = 0.5 + (0.5 * _bounce(value));
+            final opacity = 0.4 + (0.6 * _bounce(value));
+
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              child: Transform.scale(
+                scale: scale,
+                child: Opacity(
+                  opacity: opacity,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: widget.color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      }),
+    );
+  }
+
+  /// Bounce curve for smoother animation
+  double _bounce(double t) {
+    if (t < 0.5) {
+      return 4 * t * t * t;
+    } else {
+      return 1 - ((-2 * t + 2) * (-2 * t + 2) * (-2 * t + 2)) / 2;
+    }
   }
 }
 

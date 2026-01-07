@@ -52,9 +52,9 @@ class TtsController extends ChangeNotifier {
   bool _usingCloudTts = false;
   bool get usingCloudTts => _usingCloudTts;
 
-  // Loading state for cloud TTS
-  bool _isLoading = false;
-  bool get isLoading => _isLoading;
+  // Streaming state for cloud TTS (audio being fetched)
+  bool _isStreaming = false;
+  bool get isStreaming => _isStreaming;
 
   // Error handling
   String? _lastError;
@@ -111,6 +111,19 @@ class TtsController extends ChangeNotifier {
       }
     };
 
+    // Handle fallback from cloud to local TTS
+    _cloudTtsService.onFallbackNeeded = (remainingText, error) async {
+      debugPrint('ElevenLabs fallback triggered: $error');
+      _usingCloudTts = false;
+      _lastError = 'ElevenLabs indisponible, continuation avec la voix locale';
+      notifyListeners();
+
+      // Continue with local TTS for the remaining text
+      if (remainingText.isNotEmpty) {
+        await _localTtsService.speak(remainingText);
+      }
+    };
+
     // Load voices (for local TTS)
     _loadVoices();
 
@@ -125,8 +138,16 @@ class TtsController extends ChangeNotifier {
   }
 
   void _updateStateFromCloud(ElevenLabsState state) {
+    debugPrint('TtsController: _updateStateFromCloud($state)');
     _isPlaying = state == ElevenLabsState.playing;
     _isPaused = state == ElevenLabsState.paused;
+
+    // Streaming ends ONLY when playback starts (not on stopped)
+    if (state == ElevenLabsState.playing) {
+      debugPrint('TtsController: _isStreaming set to FALSE (playback started)');
+      _isStreaming = false;
+    }
+
     notifyListeners();
   }
 
@@ -151,7 +172,8 @@ class TtsController extends ChangeNotifier {
     if (isOnline) {
       // Use ElevenLabs cloud TTS
       _usingCloudTts = true;
-      _isLoading = true;
+      _isStreaming = true;
+      debugPrint('TtsController: _isStreaming set to TRUE, notifying...');
       notifyListeners();
 
       await _localTtsService.stop(); // Stop local if playing
@@ -167,10 +189,8 @@ class TtsController extends ChangeNotifier {
         debugPrint('ElevenLabs error: $e, falling back to local TTS');
         _lastError = 'ElevenLabs indisponible, utilisation de la voix locale';
         _usingCloudTts = false;
+        _isStreaming = false;
         await _localTtsService.speak(text);
-      } finally {
-        _isLoading = false;
-        notifyListeners();
       }
     } else {
       // Use local flutter_tts

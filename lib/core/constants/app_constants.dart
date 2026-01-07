@@ -23,4 +23,8 @@ class AppConstants {
   static const String elevenLabsDefaultVoiceId =
       'JBFqnCBsd6RMkjVDRZzb'; // Default voice
   static const String elevenLabsModel = 'eleven_multilingual_v2';
+
+  // ElevenLabs Streaming
+  static const int elevenLabsMaxChunkSize = 5000; // Safe margin vs 10k limit
+  static const int elevenLabsMinChunkSize = 100; // Minimum for good prosody
 }
